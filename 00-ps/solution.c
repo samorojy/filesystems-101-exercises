@@ -37,23 +37,20 @@ void ps(void) {
                 }
 
                 char *argv[256] = {0};
-                size_t argc = 0;
+                argv[0] = exe_path;
+                size_t argc = 1;
                 char buffer[4096];
                 size_t total_read = fread(buffer, 1, sizeof(buffer), cmdline_file);
                 fclose(cmdline_file);
 
-                if (total_read > 0) {
-                    size_t i, j = 0;
-                    for (i = 0; i < total_read; i++) {
-                        if (buffer[i] == '\0') {
-                            argv[argc++] = &buffer[j];
-                            j = i + 1;
-                        }
+                size_t i = 0, j = 0;
+                for (i = 0; i < total_read; i++) {
+                    if (buffer[i] == '\0') {
+                        argv[argc++] = &buffer[j];
+                        j = i + 1;
                     }
-                } else {
-                    argv[0] = exe_path;
-                    argc = 1;
                 }
+                argv[argc] = NULL;
 
                 snprintf(path, sizeof(path), "/proc/%d/environ", pid);
                 FILE *env_file = fopen(path, "r");
@@ -76,6 +73,7 @@ void ps(void) {
                         }
                     }
                 }
+                envp[envc] = NULL;
 
                 report_process(pid, exe_path, argv, envp);
             }
