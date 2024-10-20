@@ -37,16 +37,16 @@ void ps(void) {
                 }
 
                 char *argv[256] = {0};
-                argv[0] = exe_path;
-                size_t argc = 1;
-                char buffer[4096];
-                size_t total_read = fread(buffer, 1, sizeof(buffer), cmdline_file);
+                char cmdline_buffer[8192];
+                size_t total_read = fread(cmdline_buffer, 1, sizeof(cmdline_buffer), cmdline_file);
                 fclose(cmdline_file);
 
-                size_t i = 0, j = 0;
+
+                size_t argc = 0;
+                size_t i, j = 0;
                 for (i = 0; i < total_read; i++) {
-                    if (buffer[i] == '\0') {
-                        argv[argc++] = &buffer[j];
+                    if (cmdline_buffer[i] == '\0') {
+                        argv[argc++] = &cmdline_buffer[j];
                         j = i + 1;
                     }
                 }
@@ -61,14 +61,15 @@ void ps(void) {
 
                 char *envp[256] = {0};
                 size_t envc = 0;
-                total_read = fread(buffer, 1, sizeof(buffer), env_file);
+                char env_buffer[8192];
+                total_read = fread(env_buffer, 1, sizeof(env_buffer), env_file);
                 fclose(env_file);
 
                 if (total_read > 0) {
                     size_t i, j = 0;
                     for (i = 0; i < total_read; i++) {
-                        if (buffer[i] == '\0') {
-                            envp[envc++] = &buffer[j];
+                        if (env_buffer[i] == '\0') {
+                            envp[envc++] = &env_buffer[j];
                             j = i + 1;
                         }
                     }
