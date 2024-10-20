@@ -37,7 +37,7 @@ void ps(void) {
                 }
 
                 char *argv[] = {0};
-                char cmdline_buffer[4096];
+                char cmdline_buffer[1024];
                 size_t total_read = fread(cmdline_buffer, 1, sizeof(cmdline_buffer), cmdline_file);
                 fclose(cmdline_file);
 
@@ -59,9 +59,9 @@ void ps(void) {
                     continue;
                 }
 
-                char *envp[4096] = {0};
+                char *envp[1024] = {0};
                 size_t envc = 0;
-                char env_buffer[4096];
+                char env_buffer[1024];
                 total_read = fread(env_buffer, 1, sizeof(env_buffer), env_file);
                 fclose(env_file);
 
