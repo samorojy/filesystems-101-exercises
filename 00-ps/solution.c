@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <dirent.h>
 #include <errno.h>
+#include <string.h>
 
 void ps(void) {
     DIR *proc_dir = opendir("/proc");
@@ -36,17 +37,23 @@ void ps(void) {
                     continue;
                 }
 
-                char *argv[] = {0};
-                char cmdline_buffer[512];
+                char cmdline_buffer[4096];
                 size_t total_read = fread(cmdline_buffer, 1, sizeof(cmdline_buffer), cmdline_file);
                 fclose(cmdline_file);
 
-
                 size_t argc = 0;
-                size_t i, j = 0;
-                for (i = 0; i < total_read; i++) {
+                for (size_t i = 0; i < total_read; i++) {
                     if (cmdline_buffer[i] == '\0') {
-                        argv[argc++] = &cmdline_buffer[j];
+                        argc++;
+                    }
+                }
+
+                char **argv = (char **)malloc((argc + 1) * sizeof(char *));
+                size_t j = 0;
+                argc = 0;
+                for (size_t i = 0; i < total_read; i++) {
+                    if (cmdline_buffer[i] == '\0') {
+                        argv[argc++] = strdup(&cmdline_buffer[j]);
                         j = i + 1;
                     }
                 }
@@ -56,27 +63,45 @@ void ps(void) {
                 FILE *env_file = fopen(path, "r");
                 if (!env_file) {
                     report_error(path, errno);
+                    for (size_t i = 0; i < argc; i++) {
+                        free(argv[i]);
+                    }
+                    free(argv);
                     continue;
                 }
 
-                char *envp[512] = {0};
-                size_t envc = 0;
-                char env_buffer[512];
+                char env_buffer[4096];
                 total_read = fread(env_buffer, 1, sizeof(env_buffer), env_file);
                 fclose(env_file);
 
-                if (total_read > 0) {
-                    size_t i, j = 0;
-                    for (i = 0; i < total_read; i++) {
-                        if (env_buffer[i] == '\0') {
-                            envp[envc++] = &env_buffer[j];
-                            j = i + 1;
-                        }
+                size_t envc = 0;
+                for (size_t i = 0; i < total_read; i++) {
+                    if (env_buffer[i] == '\0') {
+                        envc++;
+                    }
+                }
+
+                char **envp = (char **)malloc((envc + 1) * sizeof(char *));
+                j = 0;
+                envc = 0;
+                for (size_t i = 0; i < total_read; i++) {
+                    if (env_buffer[i] == '\0') {
+                        envp[envc++] = strdup(&env_buffer[j]);
+                        j = i + 1;
                     }
                 }
                 envp[envc] = NULL;
 
                 report_process(pid, exe_path, argv, envp);
+
+                for (size_t i = 0; i < argc; i++) {
+                    free(argv[i]);
+                }
+                free(argv);
+                for (size_t i = 0; i < envc; i++) {
+                    free(envp[i]);
+                }
+                free(envp);
             }
         }
     }
