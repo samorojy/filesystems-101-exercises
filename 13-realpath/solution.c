@@ -6,13 +6,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-int custom_realpath(const char* path, char* resolved_path)
+int custom_realpath(const char* path, char* resolved_path, char* error_path)
 {
     char temp_path[PATH_MAX];
     size_t path_len = strlen(path);
     if (path_len >= PATH_MAX)
     {
         errno = ENAMETOOLONG;
+        if (error_path) strncpy(error_path, path, PATH_MAX - 1);
         return -1;
     }
     memcpy(temp_path, path, path_len);
@@ -33,7 +34,7 @@ int custom_realpath(const char* path, char* resolved_path)
     {
         if (strcmp(token, ".") == 0)
         {
-            // chill
+            // Skip current directory token
         }
         else if (strcmp(token, "..") == 0)
         {
@@ -71,11 +72,13 @@ int custom_realpath(const char* path, char* resolved_path)
             else
             {
                 errno = ENAMETOOLONG;
+                if (error_path) strncpy(error_path, resolved_path, PATH_MAX - 1);
                 return -1;
             }
 
             if (lstat(resolved_path, &path_stat) != 0)
             {
+                if (error_path) strncpy(error_path, resolved_path, PATH_MAX - 1);
                 return -1;
             }
 
@@ -84,6 +87,7 @@ int custom_realpath(const char* path, char* resolved_path)
                 ssize_t len = readlink(resolved_path, link_target, sizeof(link_target) - 1);
                 if (len == -1)
                 {
+                    if (error_path) strncpy(error_path, resolved_path, PATH_MAX - 1);
                     return -1;
                 }
 
@@ -100,6 +104,7 @@ int custom_realpath(const char* path, char* resolved_path)
                     else
                     {
                         errno = ENAMETOOLONG;
+                        if (error_path) strncpy(error_path, link_target, PATH_MAX - 1);
                         return -1;
                     }
                 }
@@ -126,6 +131,7 @@ int custom_realpath(const char* path, char* resolved_path)
                     else
                     {
                         errno = ENAMETOOLONG;
+                        if (error_path) strncpy(error_path, resolved_path, PATH_MAX - 1);
                         return -1;
                     }
                 }
@@ -151,31 +157,34 @@ int custom_realpath(const char* path, char* resolved_path)
 void abspath(const char* path)
 {
     char resolved_path[PATH_MAX];
+    char error_path[PATH_MAX];
     errno = 0;
-    if (realpath(path, resolved_path) != 0)
+    if (custom_realpath(path, resolved_path, error_path) != 0)
     {
         char parent[PATH_MAX];
-        char* slash = strrchr(path, '/');
+        char* slash = strrchr(error_path, '/');
 
         if (slash != NULL)
         {
-            size_t parent_len = slash - path;
+            size_t parent_len = slash - error_path;
             if (parent_len < PATH_MAX)
             {
-                memcpy(parent, path, parent_len);
+                memcpy(parent, error_path, parent_len);
                 parent[parent_len] = '\0';
             }
             else
             {
-                strcpy(parent, "/");
+                strncpy(parent, error_path, PATH_MAX - 1);
+                parent[PATH_MAX - 1] = '\0';
             }
         }
         else
         {
-            strcpy(parent, "/");
+            strncpy(parent, error_path, PATH_MAX - 1);
+            parent[PATH_MAX - 1] = '\0';
         }
 
-        report_error(parent, path, errno);
+        report_error(parent, error_path, errno);
         return;
     }
 
@@ -210,15 +219,17 @@ void abspath(const char* path)
             }
             else
             {
-                strcpy(parent, "/");
+                strncpy(parent, resolved_path, PATH_MAX - 1);
+                parent[PATH_MAX - 1] = '\0';
             }
         }
         else
         {
-            strcpy(parent, "/");
+            strncpy(parent, resolved_path, PATH_MAX - 1);
+            parent[PATH_MAX - 1] = '\0';
         }
 
-        report_error(parent, path, errno);
+        report_error(parent, resolved_path, errno);
         return;
     }
     report_path(resolved_path);
