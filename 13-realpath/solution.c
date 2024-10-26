@@ -177,7 +177,7 @@ void abspath(const char* path)
         }
 
         report_error(parent, path, errno);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     errno = 0;
@@ -220,7 +220,7 @@ void abspath(const char* path)
         }
 
         report_error(parent, resolved_path, errno);
-        exit(EXIT_FAILURE);
+        return;
     }
     report_path(resolved_path);
 }
