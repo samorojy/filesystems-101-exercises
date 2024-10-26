@@ -130,6 +130,17 @@ int custom_realpath(const char* path, char* resolved_path)
                         return -1;
                     }
                 }
+
+                res_len = strlen(resolved_path);
+                memcpy(temp_path, resolved_path, res_len);
+                temp_path[res_len] = '\0';
+                token = strtok(temp_path, "/");
+                resolved_path[0] = '\0';
+                if (temp_path[0] == '/')
+                {
+                    strcpy(resolved_path, "/");
+                }
+                continue;
             }
         }
         token = strtok(NULL, "/");
