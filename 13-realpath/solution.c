@@ -9,7 +9,8 @@
 int custom_realpath(const char* path, char* resolved_path)
 {
     char temp_path[PATH_MAX];
-    strlcpy(temp_path, path, PATH_MAX);
+    strncpy(temp_path, path, PATH_MAX);
+    temp_path[PATH_MAX - 1] = '\0';
 
     struct stat path_stat;
     char link_target[PATH_MAX];
@@ -68,7 +69,8 @@ int custom_realpath(const char* path, char* resolved_path)
 
                 if (link_target[0] == '/')
                 {
-                    strlcpy(resolved_path, link_target, PATH_MAX);
+                    strncpy(resolved_path, link_target, PATH_MAX);
+                    resolved_path[PATH_MAX - 1] = '\0';
                 }
                 else
                 {
@@ -100,7 +102,7 @@ void abspath(const char* path)
         if (slash != NULL)
         {
             size_t parent_len = slash - path;
-            strlcpy(parent, path, parent_len);
+            strncpy(parent, path, parent_len);
             parent[parent_len] = '\0';
         }
         else
@@ -132,7 +134,7 @@ void abspath(const char* path)
         if (slash != NULL)
         {
             size_t parent_len = slash - resolved_path;
-            strlcpy(parent, resolved_path, parent_len);
+            strncpy(parent, resolved_path, parent_len);
             parent[parent_len] = '\0';
         }
         else
