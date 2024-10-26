@@ -13,7 +13,8 @@ int custom_realpath(const char* path, char* resolved_path, char* error_path)
     if (path_len >= PATH_MAX)
     {
         errno = ENAMETOOLONG;
-        if (error_path) memcpy(error_path, path, PATH_MAX - 1);
+        if (error_path)
+            memcpy(error_path, path, PATH_MAX - 1);
         return -1;
     }
     memcpy(temp_path, path, path_len);
@@ -72,13 +73,15 @@ int custom_realpath(const char* path, char* resolved_path, char* error_path)
             else
             {
                 errno = ENAMETOOLONG;
-                if (error_path) memcpy(error_path, resolved_path, PATH_MAX - 1);
+                if (error_path)
+                    memcpy(error_path, resolved_path, PATH_MAX - 1);
                 return -1;
             }
 
             if (lstat(resolved_path, &path_stat) != 0)
             {
-                if (error_path) memcpy(error_path, resolved_path, PATH_MAX - 1);
+                if (error_path)
+                    memcpy(error_path, resolved_path, PATH_MAX - 1);
                 return -1;
             }
 
@@ -87,7 +90,8 @@ int custom_realpath(const char* path, char* resolved_path, char* error_path)
                 ssize_t len = readlink(resolved_path, link_target, sizeof(link_target) - 1);
                 if (len == -1)
                 {
-                    if (error_path) memcpy(error_path, resolved_path, PATH_MAX - 1);
+                    if (error_path)
+                        memcpy(error_path, resolved_path, PATH_MAX - 1);
                     return -1;
                 }
 
@@ -104,7 +108,8 @@ int custom_realpath(const char* path, char* resolved_path, char* error_path)
                     else
                     {
                         errno = ENAMETOOLONG;
-                        if (error_path) memcpy(error_path, link_target, PATH_MAX - 1);
+                        if (error_path)
+                            memcpy(error_path, link_target, PATH_MAX - 1);
                         return -1;
                     }
                 }
@@ -131,7 +136,8 @@ int custom_realpath(const char* path, char* resolved_path, char* error_path)
                     else
                     {
                         errno = ENAMETOOLONG;
-                        if (error_path) memcpy(error_path, resolved_path, PATH_MAX - 1);
+                        if (error_path)
+                            memcpy(error_path, resolved_path, PATH_MAX - 1);
                         return -1;
                     }
                 }
@@ -158,33 +164,36 @@ void abspath(const char* path)
 {
     char resolved_path[PATH_MAX];
     char error_path[PATH_MAX];
+    char parent[PATH_MAX];
+    char child[PATH_MAX];
     errno = 0;
+
     if (custom_realpath(path, resolved_path, error_path) != 0)
     {
-        char parent[PATH_MAX];
         char* slash = strrchr(error_path, '/');
-
         if (slash != NULL)
         {
             size_t parent_len = slash - error_path;
-            if (parent_len < PATH_MAX)
+            if (parent_len > 0)
             {
                 memcpy(parent, error_path, parent_len);
                 parent[parent_len] = '\0';
+                memcpy(child, slash + 1, PATH_MAX - 1);
             }
             else
             {
-                memcpy(parent, error_path, PATH_MAX - 1);
-                parent[PATH_MAX - 1] = '\0';
+                strcpy(parent, "/");
+                memcpy(child, error_path + 1, PATH_MAX - 1);
             }
         }
         else
         {
-            memcpy(parent, error_path, PATH_MAX - 1);
-            parent[PATH_MAX - 1] = '\0';
+            strcpy(parent, "/");
+            memcpy(child, error_path, PATH_MAX - 1);
         }
 
-        report_error(parent, error_path, errno);
+        child[PATH_MAX - 1] = '\0';
+        report_error(parent, child, errno);
         return;
     }
 
@@ -207,29 +216,30 @@ void abspath(const char* path)
     }
     else
     {
-        char parent[PATH_MAX];
         char* slash = strrchr(resolved_path, '/');
         if (slash != NULL)
         {
             size_t parent_len = slash - resolved_path;
-            if (parent_len < PATH_MAX)
+            if (parent_len > 0)
             {
                 memcpy(parent, resolved_path, parent_len);
                 parent[parent_len] = '\0';
+                memcpy(child, slash + 1, PATH_MAX - 1);
             }
             else
             {
-                memcpy(parent, resolved_path, PATH_MAX - 1);
-                parent[PATH_MAX - 1] = '\0';
+                strcpy(parent, "/");
+                memcpy(child, resolved_path + 1, PATH_MAX - 1);
             }
         }
         else
         {
-            memcpy(parent, resolved_path, PATH_MAX - 1);
-            parent[PATH_MAX - 1] = '\0';
+            strcpy(parent, "/");
+            memcpy(child, resolved_path, PATH_MAX - 1);
         }
 
-        report_error(parent, resolved_path, errno);
+        child[PATH_MAX - 1] = '\0';
+        report_error(parent, child, errno);
         return;
     }
     report_path(resolved_path);
