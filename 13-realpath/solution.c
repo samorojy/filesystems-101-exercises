@@ -9,8 +9,14 @@
 int custom_realpath(const char* path, char* resolved_path)
 {
     char temp_path[PATH_MAX];
-    strncpy(temp_path, path, PATH_MAX);
-    temp_path[PATH_MAX - 1] = '\0';
+    size_t path_len = strlen(path);
+    if (path_len >= PATH_MAX)
+    {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(temp_path, path, path_len);
+    temp_path[path_len] = '\0';
 
     struct stat path_stat;
     char link_target[PATH_MAX];
@@ -49,9 +55,26 @@ int custom_realpath(const char* path, char* resolved_path)
         {
             if (strcmp(resolved_path, "/") != 0)
             {
-                strncat(resolved_path, "/", PATH_MAX - strlen(resolved_path) - 1);
+                size_t len = strlen(resolved_path);
+                if (len + 1 < PATH_MAX)
+                {
+                    resolved_path[len] = '/';
+                    resolved_path[len + 1] = '\0';
+                }
             }
-            strncat(resolved_path, token, PATH_MAX - strlen(resolved_path) - 1);
+            size_t token_len = strlen(token);
+            size_t res_len = strlen(resolved_path);
+            if (res_len + token_len < PATH_MAX)
+            {
+                memcpy(resolved_path + res_len, token, token_len);
+                resolved_path[res_len + token_len] = '\0';
+            }
+            else
+            {
+                errno = ENAMETOOLONG;
+                return -1;
+            }
+
             if (lstat(resolved_path, &path_stat) != 0)
             {
                 return -1;
@@ -69,8 +92,17 @@ int custom_realpath(const char* path, char* resolved_path)
 
                 if (link_target[0] == '/')
                 {
-                    strncpy(resolved_path, link_target, PATH_MAX);
-                    resolved_path[PATH_MAX - 1] = '\0';
+                    size_t link_len = strlen(link_target);
+                    if (link_len < PATH_MAX)
+                    {
+                        memcpy(resolved_path, link_target, link_len);
+                        resolved_path[link_len] = '\0';
+                    }
+                    else
+                    {
+                        errno = ENAMETOOLONG;
+                        return -1;
+                    }
                 }
                 else
                 {
@@ -79,8 +111,24 @@ int custom_realpath(const char* path, char* resolved_path)
                     {
                         *buffer = '\0';
                     }
-                    strncat(resolved_path, "/", PATH_MAX - strlen(resolved_path) - 1);
-                    strncat(resolved_path, link_target, PATH_MAX - strlen(resolved_path) - 1);
+                    size_t res_len = strlen(resolved_path);
+                    if (res_len + 1 < PATH_MAX)
+                    {
+                        resolved_path[res_len] = '/';
+                        resolved_path[res_len + 1] = '\0';
+                        res_len++;
+                    }
+                    size_t link_len = strlen(link_target);
+                    if (res_len + link_len < PATH_MAX)
+                    {
+                        memcpy(resolved_path + res_len, link_target, link_len);
+                        resolved_path[res_len + link_len] = '\0';
+                    }
+                    else
+                    {
+                        errno = ENAMETOOLONG;
+                        return -1;
+                    }
                 }
             }
         }
@@ -102,8 +150,15 @@ void abspath(const char* path)
         if (slash != NULL)
         {
             size_t parent_len = slash - path;
-            strncpy(parent, path, parent_len);
-            parent[parent_len] = '\0';
+            if (parent_len < PATH_MAX)
+            {
+                memcpy(parent, path, parent_len);
+                parent[parent_len] = '\0';
+            }
+            else
+            {
+                strcpy(parent, "/");
+            }
         }
         else
         {
@@ -123,7 +178,11 @@ void abspath(const char* path)
             size_t len = strlen(resolved_path);
             if (resolved_path[len - 1] != '/')
             {
-                strncat(resolved_path, "/", PATH_MAX - len - 1);
+                if (len + 1 < PATH_MAX)
+                {
+                    resolved_path[len] = '/';
+                    resolved_path[len + 1] = '\0';
+                }
             }
         }
     }
@@ -134,8 +193,15 @@ void abspath(const char* path)
         if (slash != NULL)
         {
             size_t parent_len = slash - resolved_path;
-            strncpy(parent, resolved_path, parent_len);
-            parent[parent_len] = '\0';
+            if (parent_len < PATH_MAX)
+            {
+                memcpy(parent, resolved_path, parent_len);
+                parent[parent_len] = '\0';
+            }
+            else
+            {
+                strcpy(parent, "/");
+            }
         }
         else
         {
