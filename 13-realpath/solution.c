@@ -20,7 +20,6 @@ int custom_realpath(const char* path, char* resolved_path)
 
     struct stat path_stat;
     char link_target[PATH_MAX];
-    char* token;
     char* buffer;
     resolved_path[0] = '\0';
 
@@ -29,7 +28,7 @@ int custom_realpath(const char* path, char* resolved_path)
         strcpy(resolved_path, "/");
     }
 
-    token = strtok(temp_path, "/");
+    char* token = strtok(temp_path, "/");
     while (token != NULL)
     {
         if (strcmp(token, ".") == 0)
@@ -219,7 +218,7 @@ void abspath(const char* path)
             strcpy(parent, "/");
         }
 
-        report_error(parent, resolved_path, errno);
+        report_error(parent, path, errno);
         return;
     }
     report_path(resolved_path);
