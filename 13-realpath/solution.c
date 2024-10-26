@@ -152,7 +152,7 @@ void abspath(const char* path)
 {
     char resolved_path[PATH_MAX];
     errno = 0;
-    if (custom_realpath(path, resolved_path) != 0)
+    if (realpath(path, resolved_path) != 0)
     {
         char parent[PATH_MAX];
         char* slash = strrchr(path, '/');
