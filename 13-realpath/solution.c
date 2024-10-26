@@ -13,7 +13,7 @@ int custom_realpath(const char* path, char* resolved_path, char* error_path)
     if (path_len >= PATH_MAX)
     {
         errno = ENAMETOOLONG;
-        if (error_path) strncpy(error_path, path, PATH_MAX - 1);
+        if (error_path) memcpy(error_path, path, PATH_MAX - 1);
         return -1;
     }
     memcpy(temp_path, path, path_len);
@@ -72,13 +72,13 @@ int custom_realpath(const char* path, char* resolved_path, char* error_path)
             else
             {
                 errno = ENAMETOOLONG;
-                if (error_path) strncpy(error_path, resolved_path, PATH_MAX - 1);
+                if (error_path) memcpy(error_path, resolved_path, PATH_MAX - 1);
                 return -1;
             }
 
             if (lstat(resolved_path, &path_stat) != 0)
             {
-                if (error_path) strncpy(error_path, resolved_path, PATH_MAX - 1);
+                if (error_path) memcpy(error_path, resolved_path, PATH_MAX - 1);
                 return -1;
             }
 
@@ -87,7 +87,7 @@ int custom_realpath(const char* path, char* resolved_path, char* error_path)
                 ssize_t len = readlink(resolved_path, link_target, sizeof(link_target) - 1);
                 if (len == -1)
                 {
-                    if (error_path) strncpy(error_path, resolved_path, PATH_MAX - 1);
+                    if (error_path) memcpy(error_path, resolved_path, PATH_MAX - 1);
                     return -1;
                 }
 
@@ -104,7 +104,7 @@ int custom_realpath(const char* path, char* resolved_path, char* error_path)
                     else
                     {
                         errno = ENAMETOOLONG;
-                        if (error_path) strncpy(error_path, link_target, PATH_MAX - 1);
+                        if (error_path) memcpy(error_path, link_target, PATH_MAX - 1);
                         return -1;
                     }
                 }
@@ -131,7 +131,7 @@ int custom_realpath(const char* path, char* resolved_path, char* error_path)
                     else
                     {
                         errno = ENAMETOOLONG;
-                        if (error_path) strncpy(error_path, resolved_path, PATH_MAX - 1);
+                        if (error_path) memcpy(error_path, resolved_path, PATH_MAX - 1);
                         return -1;
                     }
                 }
@@ -174,13 +174,13 @@ void abspath(const char* path)
             }
             else
             {
-                strncpy(parent, error_path, PATH_MAX - 1);
+                memcpy(parent, error_path, PATH_MAX - 1);
                 parent[PATH_MAX - 1] = '\0';
             }
         }
         else
         {
-            strncpy(parent, error_path, PATH_MAX - 1);
+            memcpy(parent, error_path, PATH_MAX - 1);
             parent[PATH_MAX - 1] = '\0';
         }
 
@@ -219,13 +219,13 @@ void abspath(const char* path)
             }
             else
             {
-                strncpy(parent, resolved_path, PATH_MAX - 1);
+                memcpy(parent, resolved_path, PATH_MAX - 1);
                 parent[PATH_MAX - 1] = '\0';
             }
         }
         else
         {
-            strncpy(parent, resolved_path, PATH_MAX - 1);
+            memcpy(parent, resolved_path, PATH_MAX - 1);
             parent[PATH_MAX - 1] = '\0';
         }
 
