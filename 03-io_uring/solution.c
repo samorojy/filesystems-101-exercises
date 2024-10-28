@@ -4,6 +4,83 @@
 const int READ_QUEUE = 4;
 const int IO_BLOCK_SIZE = 256 * 1024;
 
+static int submit_read(struct io_uring* ring, int in, char buffer[READ_QUEUE][IO_BLOCK_SIZE],
+                       off_t* read_offset, int* inflight_reads)
+{
+    for (int i = 0; i < READ_QUEUE; ++i)
+    {
+        struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+        if (!sqe)
+        {
+            return -ENOMEM;
+        }
+        io_uring_prep_read(sqe, in, buffer[i], IO_BLOCK_SIZE, *read_offset);
+        sqe->user_data = (uint64_t)&buffer[i];
+        *read_offset += IO_BLOCK_SIZE;
+        (*inflight_reads)++;
+    }
+
+    int ret = io_uring_submit(ring);
+    if (ret < 0)
+    {
+        return -errno;
+    }
+    return 0;
+}
+
+static int process_write(struct io_uring* ring, struct io_uring_cqe* cqe, int out, off_t* write_offset,
+                         int* submit_count)
+{
+    int bytes_read = cqe->res;
+    char* buffer_ptr = (char*)cqe->user_data;
+
+    if (bytes_read > 0)
+    {
+        struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+        if (!sqe)
+        {
+            return -ENOMEM;
+        }
+        io_uring_prep_write(sqe, out, buffer_ptr, bytes_read, *write_offset);
+        *write_offset += bytes_read;
+        (*submit_count)++;
+
+        int ret = io_uring_submit(ring);
+        if (ret < 0)
+        {
+            return -errno;
+        }
+    }
+
+    io_uring_cqe_seen(ring, cqe);
+    return bytes_read == IO_BLOCK_SIZE ? 1 : 0;
+}
+
+static int wait_requests(struct io_uring* ring, int* submit_count)
+{
+    struct io_uring_cqe* cqe;
+    int ret;
+
+    while (*submit_count > 0)
+    {
+        ret = io_uring_wait_cqe(ring, &cqe);
+        if (ret < 0)
+        {
+            return -errno;
+        }
+
+        if (cqe->res < 0)
+        {
+            return -cqe->res;
+        }
+
+        io_uring_cqe_seen(ring, cqe);
+        (*submit_count)--;
+    }
+
+    return 0;
+}
+
 int copy(int in, int out)
 {
     struct io_uring ring;
@@ -13,35 +90,18 @@ int copy(int in, int out)
     }
 
     char buffer[READ_QUEUE][IO_BLOCK_SIZE];
-    struct io_uring_sqe* sqe;
-    struct io_uring_cqe* cqe;
-    off_t read_offset = 0;
-    off_t write_offset = 0;
-    int ret, submit_count = 0;
+    off_t read_offset = 0, write_offset = 0;
+    int submit_count = 0, inflight_reads = 0;
 
-    for (int i = 0; i < READ_QUEUE; ++i)
-    {
-        sqe = io_uring_get_sqe(&ring);
-        if (!sqe)
-        {
-            ret = -ENOMEM;
-            goto cleanup;
-        }
-        io_uring_prep_read(sqe, in, buffer[i], IO_BLOCK_SIZE, read_offset);
-        sqe->user_data = (uint64_t)&buffer[i];
-        read_offset += IO_BLOCK_SIZE;
-        submit_count++;
-    }
-
-    ret = io_uring_submit(&ring);
+    int ret = submit_read(&ring, in, buffer, &read_offset, &inflight_reads);
     if (ret < 0)
     {
-        ret = -errno;
         goto cleanup;
     }
 
-    while (submit_count > 0)
+    while (inflight_reads > 0)
     {
+        struct io_uring_cqe* cqe;
         ret = io_uring_wait_cqe(&ring, &cqe);
         if (ret < 0)
         {
@@ -55,59 +115,37 @@ int copy(int in, int out)
             goto cleanup;
         }
 
-        if (cqe->res == 0)
-        {
-            io_uring_cqe_seen(&ring, cqe);
-            break;
-        }
+        inflight_reads--;
 
-        int bytes_read = cqe->res;
-        char* buffer_ptr = (char*)cqe->user_data;
-
-        sqe = io_uring_get_sqe(&ring);
-        if (!sqe)
-        {
-            ret = -ENOMEM;
-            goto cleanup;
-        }
-        io_uring_prep_write(sqe, out, buffer_ptr, bytes_read, write_offset);
-        write_offset += bytes_read;
-
-        ret = io_uring_submit(&ring);
+        ret = process_write(&ring, cqe, out, &write_offset, &submit_count);
         if (ret < 0)
         {
-            ret = -errno;
             goto cleanup;
         }
 
-        io_uring_cqe_seen(&ring, cqe);
-        submit_count--;
-
-        if (bytes_read < IO_BLOCK_SIZE)
+        if (ret > 0)
         {
-            break;
-        }
+            struct io_uring_sqe* sqe = io_uring_get_sqe(&ring);
+            if (!sqe)
+            {
+                ret = -ENOMEM;
+                goto cleanup;
+            }
+            io_uring_prep_read(sqe, in, (char*)cqe->user_data, IO_BLOCK_SIZE, read_offset);
+            sqe->user_data = cqe->user_data;
+            read_offset += IO_BLOCK_SIZE;
+            inflight_reads++;
 
-        sqe = io_uring_get_sqe(&ring);
-        if (!sqe)
-        {
-            ret = -ENOMEM;
-            goto cleanup;
-        }
-        io_uring_prep_read(sqe, in, buffer_ptr, IO_BLOCK_SIZE, read_offset);
-        sqe->user_data = (uint64_t)buffer_ptr;
-        read_offset += IO_BLOCK_SIZE;
-        submit_count++;
-
-        ret = io_uring_submit(&ring);
-        if (ret < 0)
-        {
-            ret = -errno;
-            goto cleanup;
+            ret = io_uring_submit(&ring);
+            if (ret < 0)
+            {
+                ret = -errno;
+                goto cleanup;
+            }
         }
     }
 
-    ret = 0;
+    ret = wait_requests(&ring, &submit_count);
 
 cleanup:
     io_uring_queue_exit(&ring);
