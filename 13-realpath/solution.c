@@ -26,38 +26,6 @@ bool handle_symlink(char *result, size_t *result_len, const char *link_path) {
 }
 
 bool process_segment(char *result, size_t *result_len, const char *seg_start, size_t seg_len) {
-    char temp_path[PATH_MAX];
-    size_t temp_len = *result_len;
-    memcpy(temp_path, result, temp_len);
-    temp_path[temp_len] = '\0';
-
-    if (temp_len > 1) {
-        temp_path[temp_len++] = '/';
-        temp_path[temp_len] = '\0';
-    }
-
-    memcpy(temp_path + temp_len, seg_start, seg_len);
-    temp_path[temp_len + seg_len] = '\0';
-
-    struct stat st;
-    if (lstat(temp_path, &st) == 0) {
-        if (S_ISLNK(st.st_mode)) {
-            return handle_symlink(result, result_len, temp_path);
-        }
-    } else if (errno == ENOENT) {
-        char dir[PATH_MAX];
-        char *last_slash = strrchr(temp_path, '/');
-        if (!last_slash || last_slash == temp_path) {
-            strcpy(dir, "/");
-        } else {
-            size_t dir_len = last_slash - temp_path;
-            memcpy(dir, temp_path, dir_len);
-            dir[dir_len] = '\0';
-        }
-        report_error(dir, seg_start, ENOENT);
-        return false;
-    }
-
     if (seg_len == 0 || (seg_len == 1 && seg_start[0] == '.')) {
         return true;
     }
@@ -72,34 +40,47 @@ bool process_segment(char *result, size_t *result_len, const char *seg_start, si
         return true;
     }
 
-    if (*result_len > 1) {
-        result[*result_len] = '/';
-        (*result_len)++;
+    size_t temp_len = *result_len;
+    if (temp_len > 1) {
+        result[temp_len++] = '/';
+    }
+    memcpy(result + temp_len, seg_start, seg_len);
+    temp_len += seg_len;
+    result[temp_len] = '\0';
+
+    struct stat st;
+    if (lstat(result, &st) == 0) {
+        if (S_ISLNK(st.st_mode)) {
+            return handle_symlink(result, result_len, result);
+        }
+    } else if (errno == ENOENT) {
+        result[*result_len] = '\0';
+        report_error(result, seg_start, ENOENT);
+        return false;
     }
 
-    memcpy(result + *result_len, seg_start, seg_len);
-    *result_len += seg_len;
-    result[*result_len] = '\0';
-
+    *result_len = temp_len;
     return true;
 }
 
 bool resolve(char *result, size_t *result_len, const char *path) {
     const char *p = path;
-    if (path[0] == '/') {
+    if (*p == '/') {
         memcpy(result, "/", 2);
         *result_len = 1;
         p++;
+    } else {
+        *result_len = strlen(result);
     }
 
     while (*p) {
+        while (*p == '/') {
+            p++;
+        }
         const char *seg_start = p;
         size_t seg_len = 0;
         while (*p && *p != '/') {
-            p++;
             seg_len++;
-        }
-        while (*p == '/') {
             p++;
         }
         if (!process_segment(result, result_len, seg_start, seg_len)) {
