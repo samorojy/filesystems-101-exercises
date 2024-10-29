@@ -1,153 +1,115 @@
-#include <liburing.h>
+#include <solution.h>
 #include <errno.h>
+#include <sys/stat.h>
+#include <liburing.h>
+#include "fs_malloc.h"
 
-const int READ_QUEUE = 4;
-const int IO_BLOCK_SIZE = 256 * 1024;
+#define QUEUE_DEPTH 8
+#define IO_BLOCK_SIZE (256 * 1024)
+#define MAX_READS 4
 
-static int submit_read(struct io_uring* ring, int in, char buffer[READ_QUEUE][IO_BLOCK_SIZE],
-                       off_t* read_offset, int* inflight_reads)
-{
-    for (int i = 0; i < READ_QUEUE; ++i)
-    {
-        struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-        if (!sqe)
-        {
-            return -ENOMEM;
-        }
-        io_uring_prep_read(sqe, in, buffer[i], IO_BLOCK_SIZE, *read_offset);
-        sqe->user_data = (uint64_t)&buffer[i];
-        *read_offset += IO_BLOCK_SIZE;
-        (*inflight_reads)++;
+struct io_task {
+    int is_read;
+    off_t start_offset, current_offset;
+    size_t first_length;
+    char *buffer;
+};
+
+
+off_t get_file_size(int fd) {
+    struct stat st;
+    if (fstat(fd, &st) < 0) return -1;
+    if (S_ISREG(st.st_mode)) {
+        return st.st_size;
     }
-
-    int ret = io_uring_submit(ring);
-    if (ret < 0)
-    {
-        return -errno;
-    }
-    return 0;
+    return -1;
 }
 
-static int process_write(struct io_uring* ring, struct io_uring_cqe* cqe, int out, off_t* write_offset,
-                         int* submit_count)
-{
-    int bytes_read = cqe->res;
-    char* buffer_ptr = (char*)cqe->user_data;
+int submit_read(int fd, struct io_uring *ring, off_t size, off_t offset) {
+    struct io_task *task = fs_xmalloc(sizeof(*task) + size);
+    if (!task) return -1;
 
-    if (bytes_read > 0)
-    {
-        struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-        if (!sqe)
-        {
-            return -ENOMEM;
-        }
-        io_uring_prep_write(sqe, out, buffer_ptr, bytes_read, *write_offset);
-        *write_offset += bytes_read;
-        (*submit_count)++;
-
-        int ret = io_uring_submit(ring);
-        if (ret < 0)
-        {
-            return -errno;
-        }
-    }
-
-    io_uring_cqe_seen(ring, cqe);
-    return bytes_read == IO_BLOCK_SIZE ? 1 : 0;
-}
-
-static int wait_requests(struct io_uring* ring, int* submit_count)
-{
-    struct io_uring_cqe* cqe;
-    int ret;
-
-    while (*submit_count > 0)
-    {
-        ret = io_uring_wait_cqe(ring, &cqe);
-        if (ret < 0)
-        {
-            return -errno;
-        }
-
-        if (cqe->res < 0)
-        {
-            return -cqe->res;
-        }
-
-        io_uring_cqe_seen(ring, cqe);
-        (*submit_count)--;
-    }
-
-    return 0;
-}
-
-int copy(int in, int out)
-{
-    struct io_uring ring;
-    if (io_uring_queue_init(READ_QUEUE, &ring, 0) < 0)
-    {
+    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+    if (!sqe) {
+        free(task);
         return -1;
     }
 
-    char buffer[READ_QUEUE][IO_BLOCK_SIZE];
-    off_t read_offset = 0, write_offset = 0;
-    int submit_count = 0, inflight_reads = 0;
+    task->is_read = true;
+    task->current_offset = task->start_offset = offset;
+    task->buffer = (char *) (task + 1);
+    task->first_length = size;
 
-    int ret = submit_read(&ring, in, buffer, &read_offset, &inflight_reads);
-    if (ret < 0)
-    {
-        goto cleanup;
+    io_uring_prep_read(sqe, fd, task->buffer, size, offset);
+    io_uring_sqe_set_data(sqe, task);
+    return 0;
+}
+
+int copy_file(int in, int out, struct io_uring *ring, off_t file_size) {
+    int read_operations = 0, write_operations = 0;
+    off_t bytes_remaining_to_write = file_size;
+    off_t current_offset = 0;
+
+    while (file_size || bytes_remaining_to_write) {
+        int read_batch_size = 0;
+
+        for (int i = 0; i < MAX_READS; ++i) {
+            off_t size = file_size > IO_BLOCK_SIZE ? IO_BLOCK_SIZE : file_size;
+            if (!size || submit_read(in, ring, size, current_offset)) break;
+            read_batch_size += size;
+            file_size -= size;
+            current_offset += size;
+            read_operations++;
+        }
+
+        if (read_batch_size) {
+            if (io_uring_submit(ring) < 0) return -errno;
+        }
+
+        while (read_batch_size) {
+            struct io_uring_cqe *cqe;
+            if (io_uring_wait_cqe(ring, &cqe)) return -errno;
+
+            struct io_task *task = io_uring_cqe_get_data(cqe);
+
+            task->is_read = false;
+            task->current_offset = task->start_offset;
+            task->buffer = (char *) (task + 1);
+
+            struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+            io_uring_prep_write(sqe, out, task->buffer, task->first_length, task->current_offset);
+            io_uring_sqe_set_data(sqe, task);
+            if (io_uring_submit(ring) < 0) return -errno;
+
+            bytes_remaining_to_write -= task->first_length;
+            read_batch_size -= task->first_length;
+            read_operations--;
+            write_operations++;
+
+            io_uring_cqe_seen(ring, cqe);
+        }
+
+        for (int i = 0; i < write_operations; ++i) {
+            struct io_uring_cqe *cqe;
+            if (io_uring_wait_cqe(ring, &cqe)) return -errno;
+
+            struct io_task *task = io_uring_cqe_get_data(cqe);
+            free(task);
+            io_uring_cqe_seen(ring, cqe);
+        }
+        write_operations = 0;
     }
+    return 0;
+}
 
-    while (inflight_reads > 0)
-    {
-        struct io_uring_cqe* cqe;
-        ret = io_uring_wait_cqe(&ring, &cqe);
-        if (ret < 0)
-        {
-            ret = -errno;
-            goto cleanup;
-        }
+int copy(int in, int out) {
+    struct io_uring ring;
+    errno = 0;
+    if (io_uring_queue_init(QUEUE_DEPTH, &ring, 0) < 0) return -errno;
+    off_t file_size = get_file_size(in);
+    if (file_size < 0) return -errno;
 
-        if (cqe->res < 0)
-        {
-            ret = -cqe->res;
-            goto cleanup;
-        }
-
-        inflight_reads--;
-
-        ret = process_write(&ring, cqe, out, &write_offset, &submit_count);
-        if (ret < 0)
-        {
-            goto cleanup;
-        }
-
-        if (ret > 0)
-        {
-            struct io_uring_sqe* sqe = io_uring_get_sqe(&ring);
-            if (!sqe)
-            {
-                ret = -ENOMEM;
-                goto cleanup;
-            }
-            io_uring_prep_read(sqe, in, (char*)cqe->user_data, IO_BLOCK_SIZE, read_offset);
-            sqe->user_data = cqe->user_data;
-            read_offset += IO_BLOCK_SIZE;
-            inflight_reads++;
-
-            ret = io_uring_submit(&ring);
-            if (ret < 0)
-            {
-                ret = -errno;
-                goto cleanup;
-            }
-        }
-    }
-
-    ret = wait_requests(&ring, &submit_count);
-
-cleanup:
+    int result = copy_file(in, out, &ring, file_size);
     io_uring_queue_exit(&ring);
-    return ret;
+    return result;
 }
