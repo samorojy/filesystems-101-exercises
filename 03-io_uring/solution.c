@@ -9,8 +9,8 @@
 #define MAX_READS 4
 
 struct io_task {
-    int is_read;
-    off_t start_offset, current_offset;
+    bool is_read;
+    int start_offset, current_offset;
     size_t first_length;
     char *buffer;
 };
