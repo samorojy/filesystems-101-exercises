@@ -1,246 +1,124 @@
-#include <solution.h>
-#include <stdlib.h>
-#include <errno.h>
+#include <stdio.h>
 #include <string.h>
-#include <limits.h>
-#include <sys/stat.h>
 #include <unistd.h>
+#include <limits.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <stdbool.h>
+#include <solution.h>
 
-int custom_realpath(const char* path, char* resolved_path, char* error_path)
-{
-    char temp_path[PATH_MAX];
-    size_t path_len = strlen(path);
-    if (path_len >= PATH_MAX)
-    {
-        errno = ENAMETOOLONG;
-        if (error_path)
-            memcpy(error_path, path, PATH_MAX - 1);
-        return -1;
+bool resolve(char *result, size_t *result_len, const char *path);
+
+bool handle_symlink(char *result, size_t *result_len, const char *link_path) {
+    char link_buf[PATH_MAX];
+    ssize_t len = readlink(link_path, link_buf, sizeof(link_buf) - 1);
+    if (len == -1) {
+        report_error(result, link_path, errno);
+        return false;
     }
-    memcpy(temp_path, path, path_len);
-    temp_path[path_len] = '\0';
+    link_buf[len] = '\0';
 
-    struct stat path_stat;
-    char link_target[PATH_MAX];
-    char* buffer;
-    resolved_path[0] = '\0';
-
-    if (temp_path[0] == '/')
-    {
-        strcpy(resolved_path, "/");
+    if (link_buf[0] == '/') {
+        memcpy(result, "/", 2);
+        *result_len = 1;
     }
-
-    char* token = strtok(temp_path, "/");
-    while (token != NULL)
-    {
-        if (strcmp(token, ".") == 0)
-        {
-            // Skip current directory token
-        }
-        else if (strcmp(token, "..") == 0)
-        {
-            if (strcmp(resolved_path, "/") != 0)
-            {
-                buffer = strrchr(resolved_path, '/');
-                if (buffer != NULL && buffer != resolved_path)
-                {
-                    *buffer = '\0';
-                }
-                else
-                {
-                    strcpy(resolved_path, "/");
-                }
-            }
-        }
-        else
-        {
-            if (strcmp(resolved_path, "/") != 0)
-            {
-                size_t len = strlen(resolved_path);
-                if (len + 1 < PATH_MAX)
-                {
-                    resolved_path[len] = '/';
-                    resolved_path[len + 1] = '\0';
-                }
-            }
-            size_t token_len = strlen(token);
-            size_t res_len = strlen(resolved_path);
-            if (res_len + token_len < PATH_MAX)
-            {
-                memcpy(resolved_path + res_len, token, token_len);
-                resolved_path[res_len + token_len] = '\0';
-            }
-            else
-            {
-                errno = ENAMETOOLONG;
-                if (error_path)
-                    memcpy(error_path, resolved_path, PATH_MAX - 1);
-                return -1;
-            }
-
-            if (lstat(resolved_path, &path_stat) != 0)
-            {
-                if (error_path)
-                    memcpy(error_path, resolved_path, PATH_MAX - 1);
-                return -1;
-            }
-
-            if (S_ISLNK(path_stat.st_mode))
-            {
-                ssize_t len = readlink(resolved_path, link_target, sizeof(link_target) - 1);
-                if (len == -1)
-                {
-                    if (error_path)
-                        memcpy(error_path, resolved_path, PATH_MAX - 1);
-                    return -1;
-                }
-
-                link_target[len] = '\0';
-
-                if (link_target[0] == '/')
-                {
-                    size_t link_len = strlen(link_target);
-                    if (link_len < PATH_MAX)
-                    {
-                        memcpy(resolved_path, link_target, link_len);
-                        resolved_path[link_len] = '\0';
-                    }
-                    else
-                    {
-                        errno = ENAMETOOLONG;
-                        if (error_path)
-                            memcpy(error_path, link_target, PATH_MAX - 1);
-                        return -1;
-                    }
-                }
-                else
-                {
-                    buffer = strrchr(resolved_path, '/');
-                    if (buffer != NULL)
-                    {
-                        *buffer = '\0';
-                    }
-                    size_t res_len = strlen(resolved_path);
-                    if (res_len + 1 < PATH_MAX)
-                    {
-                        resolved_path[res_len] = '/';
-                        resolved_path[res_len + 1] = '\0';
-                        res_len++;
-                    }
-                    size_t link_len = strlen(link_target);
-                    if (res_len + link_len < PATH_MAX)
-                    {
-                        memcpy(resolved_path + res_len, link_target, link_len);
-                        resolved_path[res_len + link_len] = '\0';
-                    }
-                    else
-                    {
-                        errno = ENAMETOOLONG;
-                        if (error_path)
-                            memcpy(error_path, resolved_path, PATH_MAX - 1);
-                        return -1;
-                    }
-                }
-
-                res_len = strlen(resolved_path);
-                memcpy(temp_path, resolved_path, res_len);
-                temp_path[res_len] = '\0';
-                token = strtok(temp_path, "/");
-                resolved_path[0] = '\0';
-                if (temp_path[0] == '/')
-                {
-                    strcpy(resolved_path, "/");
-                }
-                continue;
-            }
-        }
-        token = strtok(NULL, "/");
-    }
-
-    return 0;
+    return resolve(result, result_len, link_buf);
 }
 
-void abspath(const char* path)
-{
+bool process_segment(char *result, size_t *result_len, const char *seg_start, size_t seg_len) {
+    char temp_path[PATH_MAX];
+    size_t temp_len = *result_len;
+    memcpy(temp_path, result, temp_len);
+    temp_path[temp_len] = '\0';
+
+    if (temp_len > 1) {
+        temp_path[temp_len++] = '/';
+        temp_path[temp_len] = '\0';
+    }
+
+    memcpy(temp_path + temp_len, seg_start, seg_len);
+    temp_path[temp_len + seg_len] = '\0';
+
+    struct stat st;
+    if (lstat(temp_path, &st) == 0) {
+        if (S_ISLNK(st.st_mode)) {
+            return handle_symlink(result, result_len, temp_path);
+        }
+    } else if (errno == ENOENT) {
+        char dir[PATH_MAX];
+        char *last_slash = strrchr(temp_path, '/');
+        if (!last_slash || last_slash == temp_path) {
+            strcpy(dir, "/");
+        } else {
+            size_t dir_len = last_slash - temp_path;
+            memcpy(dir, temp_path, dir_len);
+            dir[dir_len] = '\0';
+        }
+        report_error(dir, seg_start, ENOENT);
+        return false;
+    }
+
+    if (seg_len == 0 || (seg_len == 1 && seg_start[0] == '.')) {
+        return true;
+    }
+    if (seg_len == 2 && seg_start[0] == '.' && seg_start[1] == '.') {
+        while (*result_len > 1 && result[*result_len - 1] == '/') {
+            (*result_len)--;
+        }
+        while (*result_len > 1 && result[*result_len - 1] != '/') {
+            (*result_len)--;
+        }
+        result[*result_len] = '\0';
+        return true;
+    }
+
+    if (*result_len > 1) {
+        result[*result_len] = '/';
+        (*result_len)++;
+    }
+
+    memcpy(result + *result_len, seg_start, seg_len);
+    *result_len += seg_len;
+    result[*result_len] = '\0';
+
+    return true;
+}
+
+bool resolve(char *result, size_t *result_len, const char *path) {
+    const char *p = path;
+    if (path[0] == '/') {
+        memcpy(result, "/", 2);
+        *result_len = 1;
+        p++;
+    }
+
+    while (*p) {
+        const char *seg_start = p;
+        size_t seg_len = 0;
+        while (*p && *p != '/') {
+            p++;
+            seg_len++;
+        }
+        while (*p == '/') {
+            p++;
+        }
+        if (!process_segment(result, result_len, seg_start, seg_len)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void abspath(const char *path) {
     char resolved_path[PATH_MAX];
-    char error_path[PATH_MAX];
-    char parent[PATH_MAX];
-    char child[PATH_MAX];
+    size_t result_len = 0;
     errno = 0;
-
-    if (custom_realpath(path, resolved_path, error_path) != 0)
-    {
-        char* slash = strrchr(error_path, '/');
-        if (slash != NULL)
-        {
-            size_t parent_len = slash - error_path;
-            if (parent_len > 0)
-            {
-                memcpy(parent, error_path, parent_len);
-                parent[parent_len] = '\0';
-                memcpy(child, slash + 1, PATH_MAX - 1);
-            }
-            else
-            {
-                strcpy(parent, "/");
-                memcpy(child, error_path + 1, PATH_MAX - 1);
-            }
+    if (resolve(resolved_path, &result_len, path)) {
+        struct stat st;
+        if (stat(resolved_path, &st) == 0 && S_ISDIR(st.st_mode) && resolved_path[result_len - 1] != '/') {
+            resolved_path[result_len] = '/';
+            resolved_path[++result_len] = '\0';
         }
-        else
-        {
-            strcpy(parent, "/");
-            memcpy(child, error_path, PATH_MAX - 1);
-        }
-
-        child[PATH_MAX - 1] = '\0';
-        report_error(parent, child, errno);
-        return;
+        report_path(resolved_path);
     }
-
-    errno = 0;
-    struct stat file_stat;
-    if (stat(resolved_path, &file_stat) == 0)
-    {
-        if (S_ISDIR(file_stat.st_mode))
-        {
-            size_t len = strlen(resolved_path);
-            if (resolved_path[len - 1] != '/')
-            {
-                if (len + 1 < PATH_MAX)
-                {
-                    resolved_path[len] = '/';
-                    resolved_path[len + 1] = '\0';
-                }
-            }
-        }
-    }
-    else
-    {
-        char* slash = strrchr(resolved_path, '/');
-        if (slash != NULL)
-        {
-            size_t parent_len = slash - resolved_path;
-            if (parent_len > 0)
-            {
-                memcpy(parent, resolved_path, parent_len);
-                parent[parent_len] = '\0';
-                memcpy(child, slash + 1, PATH_MAX - 1);
-            }
-            else
-            {
-                strcpy(parent, "/");
-                memcpy(child, resolved_path + 1, PATH_MAX - 1);
-            }
-        }
-        else
-        {
-            strcpy(parent, "/");
-            memcpy(child, resolved_path, PATH_MAX - 1);
-        }
-
-        child[PATH_MAX - 1] = '\0';
-        report_error(parent, child, errno);
-        return;
-    }
-    report_path(resolved_path);
 }
